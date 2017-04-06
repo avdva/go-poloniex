@@ -5,6 +5,7 @@ type OrderBook struct {
 	Bids     [][]interface{} `json:"bids"`
 	IsFrozen int             `json:"isFrozen,string"`
 	Error    string          `json:"error"`
+	Seq      int             `json:"seq"`
 }
 
 // This can probably be implemented using UnmarshalJSON

@@ -8,9 +8,7 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/jcelliott/turnpike"
-	"github.com/mitchellh/mapstructure"
+	"github.com/avdva/turnpike"
 )
 
 const (
@@ -119,8 +117,10 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 	return
 }
 
+// SubscribeOrderBook subscribes for trades and order book updates via WAMP.
+// Send to, or close stopCh to cancel subscribtion.
 func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan struct{}) error {
-	client, err := turnpike.NewWebsocketClient(turnpike.JSON, API_WS, nil, nil)
+	client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -129,56 +129,7 @@ func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		err := client.Subscribe(symbol, nil, func(args []interface{}, kwargs map[string]interface{}) {
-			type msg struct {
-				Type string
-				Data map[string]interface{}
-			}
-			var seq int64
-			if arg, found := kwargs["seq"]; found {
-				if float64Val, ok := arg.(float64); ok {
-					seq = int64(float64Val)
-				}
-			}
-			if seq == 0 {
-				log.Errorf("poloniex: invalid seq; %v", kwargs)
-			}
-			var obooks []OrderBookUpd
-			var trades []TradeUpd
-			for _, iface := range args {
-				m, ok := iface.(map[string]interface{})
-				if !ok {
-					log.Errorf("poloniex: invalid message type: %v", iface)
-					continue
-				}
-				typ, ok := m["type"].(string)
-				if !ok {
-					log.Errorf("poloniex: invalid message type: %v", m["type"])
-					continue
-				}
-				switch typ {
-				case "orderBookModify":
-					fallthrough
-				case "orderBookRemove":
-					upd := OrderBookUpd{OpType: typ}
-					if err := mapstructure.Decode(m["data"], &upd); err == nil {
-						obooks = append(obooks, upd)
-					} else {
-						log.Errorf("poloniex: order book update decode error: %v", err)
-					}
-				case "newTrade":
-					upd := TradeUpd{OpType: typ}
-					if err := mapstructure.Decode(m["data"], &upd); err == nil {
-						trades = append(trades, upd)
-					} else {
-						log.Errorf("poloniex: trade update decode error: %v", err)
-					}
-				}
-			}
-			log.Info(args)
-			updatesCh <- MarketUpd{Seq: seq, Obooks: obooks, Trades: trades}
-		})
-		errCh <- err
+		errCh <- client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh))
 	}()
 	select {
 	case err := <-errCh:
