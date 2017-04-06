@@ -1,11 +1,13 @@
 package poloniex
 
+import "github.com/shopspring/decimal"
+
 type OrderBook struct {
-	Asks     [][]interface{} `json:"asks"`
-	Bids     [][]interface{} `json:"bids"`
-	IsFrozen int             `json:"isFrozen,string"`
-	Error    string          `json:"error"`
-	Seq      int             `json:"seq"`
+	Asks     [][]decimal.Decimal `json:"asks"`
+	Bids     [][]decimal.Decimal `json:"bids"`
+	IsFrozen int                 `json:"isFrozen,string"`
+	Error    string              `json:"error"`
+	Seq      int                 `json:"seq"`
 }
 
 // This can probably be implemented using UnmarshalJSON
