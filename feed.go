@@ -135,7 +135,7 @@ func decimalDecodeHook(from reflect.Type, to reflect.Type, v interface{}) (inter
 func timeDecodeHook(from reflect.Type, to reflect.Type, v interface{}) (interface{}, error) {
 	if to == timeType {
 		if str, ok := v.(string); ok {
-			return time.ParseInLocation("2006-02-01 15:04:05", str, time.UTC)
+			return time.ParseInLocation("2006-01-02 15:04:05", str, time.UTC)
 		}
 		return nil, errors.Errorf("cannot decode %s to time.Time", from.String())
 	}
