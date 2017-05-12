@@ -5,11 +5,11 @@ import (
 	"reflect"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/avdva/turnpike"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
-	"github.com/siddontang/go/log"
 )
 
 var (
@@ -124,6 +124,59 @@ func makeOBookSubHandler(updatesCh chan<- MarketUpd) turnpike.EventHandler {
 			}
 		}
 		updatesCh <- upd
+	}
+}
+
+func makeTickerSubHandler(updatesCh chan<- TickerUpd) turnpike.EventHandler {
+	return func(args []interface{}, kwargs map[string]interface{}) {
+		if len(args) != 10 {
+			log.Errorf("poloniex: got %d instead of 10 fields in a ticker update", len(args))
+			return
+		}
+		var upd TickerUpd
+		dec := func() (err error) {
+			defer func() {
+				if recover() != nil {
+					err = errors.New("invalid message format")
+				}
+			}()
+			upd.Pair = args[0].(string)
+			if upd.Last, err = decimal.NewFromString(args[1].(string)); err != nil {
+				return err
+			}
+			if upd.LowestAsk, err = decimal.NewFromString(args[2].(string)); err != nil {
+				return err
+			}
+			if upd.HighestBid, err = decimal.NewFromString(args[3].(string)); err != nil {
+				return err
+			}
+			if upd.PercentChange, err = decimal.NewFromString(args[4].(string)); err != nil {
+				return err
+			}
+			if upd.BaseVolume, err = decimal.NewFromString(args[5].(string)); err != nil {
+				return err
+			}
+			if upd.QuoteVolume, err = decimal.NewFromString(args[6].(string)); err != nil {
+				return err
+			}
+			if isFrozen, err := args[7].(json.Number).Int64(); err != nil {
+				return err
+			} else {
+				upd.IsFrozen = int(isFrozen)
+			}
+			if upd.High24Hr, err = decimal.NewFromString(args[8].(string)); err != nil {
+				return err
+			}
+			if upd.Low24Hr, err = decimal.NewFromString(args[9].(string)); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := dec(); err == nil {
+			updatesCh <- upd
+		} else {
+			log.Errorf("poloniex: ticker message error: %v", err)
+		}
 	}
 }
 

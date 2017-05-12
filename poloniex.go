@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/avdva/turnpike"
 )
 
@@ -119,50 +118,53 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 }
 
 // SubscribeOrderBook subscribes for trades and order book updates via WAMP.
-// Send to, or close stopCh to cancel subscribtion.
-func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan struct{}) error {
-	client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
-	if err != nil {
-		return err
-	}
-	if _, err := client.JoinRealm("realm1", nil); err != nil {
-		return err
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh))
-	}()
-	select {
-	case err := <-errCh:
-		log.Info("returned")
-		return err
-	case <-stopCh:
+//	symbol - a symbol you are interested in.
+//	updatesCh - a channel for market updates.
+//	stopCh - a channel to cancel or reset ws subscribtion.
+//		close it or send 'true' to stop subscribtion.
+//		send 'false' to reconnect. May be useful, if updates were stalled.
+func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
+	for {
+		client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := client.JoinRealm("realm1", nil); err != nil {
+			return err
+		}
+		if err := client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh)); err != nil {
+			return err
+		}
+		val, ok := <-stopCh
 		client.Close()
-		return nil
+		if val || !ok {
+			return nil
+		}
 	}
 }
 
 // SubscribeTicker subscribes for ticker via WAMP.
 // Send to, or close stopCh to cancel subscribtion.
-func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan struct{}) error {
-	client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
-	if err != nil {
-		return err
-	}
-	if _, err := client.JoinRealm("realm1", nil); err != nil {
-		return err
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- client.Subscribe("ticker", nil, func(args []interface{}, kwargs map[string]interface{}) {
-			log.Info(args)
-		})
-	}()
-	select {
-	case err := <-errCh:
-		return err
-	case <-stopCh:
+//	updatesCh - a channel for ticker updates.
+//	stopCh - a channel to cancel or reset ws subscribtion.
+//		close it or send 'true' to stop subscribtion.
+//		send 'false' to reconnect. May be useful, if updates were stalled.
+func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
+	for {
+		client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := client.JoinRealm("realm1", nil); err != nil {
+			return err
+		}
+		if err := client.Subscribe("ticker", nil, makeTickerSubHandler(updatesCh)); err != nil {
+			return err
+		}
+		val, ok := <-stopCh
 		client.Close()
-		return nil
+		if val || !ok {
+			return nil
+		}
 	}
 }
