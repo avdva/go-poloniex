@@ -49,7 +49,7 @@ type TradeUpd struct {
 	Type string
 }
 
-// MarketUpd is a message from Poloniex exchange
+// MarketUpd is a message from Poloniex exchange.
 type MarketUpd struct {
 	// Seq is constantly increasing number.
 	Seq int64
@@ -57,6 +57,11 @@ type MarketUpd struct {
 	Obooks []OrderBookUpd
 	// Trades - new trades.
 	Trades []TradeUpd
+}
+
+type TickerUpd struct {
+	Pair string
+	Ticker
 }
 
 func makeOBookSubHandler(updatesCh chan<- MarketUpd) turnpike.EventHandler {
@@ -84,7 +89,7 @@ func makeOBookSubHandler(updatesCh chan<- MarketUpd) turnpike.EventHandler {
 			}
 		}
 		if upd.Seq == 0 {
-			log.Errorf("poloniex: invalid seq; %v", kwargs)
+			log.Errorf("poloniex: invalid seq: %v", kwargs)
 		}
 		for _, iface := range args {
 			m, ok := iface.(map[string]interface{})

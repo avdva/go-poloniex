@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/avdva/turnpike"
 )
 
@@ -130,6 +131,32 @@ func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd,
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh))
+	}()
+	select {
+	case err := <-errCh:
+		log.Info("returned")
+		return err
+	case <-stopCh:
+		client.Close()
+		return nil
+	}
+}
+
+// SubscribeTicker subscribes for ticker via WAMP.
+// Send to, or close stopCh to cancel subscribtion.
+func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan struct{}) error {
+	client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := client.JoinRealm("realm1", nil); err != nil {
+		return err
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.Subscribe("ticker", nil, func(args []interface{}, kwargs map[string]interface{}) {
+			log.Info(args)
+		})
 	}()
 	select {
 	case err := <-errCh:
