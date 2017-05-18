@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -124,21 +125,33 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
-	for {
-		client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
+	tmDialer := func(network, addr string) (net.Conn, error) {
+		return net.DialTimeout(network, addr, time.Second*3)
+	}
+	f := func() (cont bool, err error) {
+		var client *turnpike.Client
+		client, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
 		if err != nil {
-			return err
+			return
 		}
-		if _, err := client.JoinRealm("realm1", nil); err != nil {
-			return err
+		defer func() {
+			go client.Close()
+		}()
+		if _, err = client.JoinRealm("realm1", nil); err != nil {
+			return
 		}
-		if err := client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh)); err != nil {
-			return err
+		if err = client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh)); err != nil {
+			return
 		}
 		val, ok := <-stopCh
-		client.Close()
 		if val || !ok {
-			return nil
+			return
+		}
+		return true, nil
+	}
+	for {
+		if cont, err := f(); !cont {
+			return err
 		}
 	}
 }
@@ -150,21 +163,33 @@ func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd,
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
-	for {
-		client, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, nil)
+	tmDialer := func(network, addr string) (net.Conn, error) {
+		return net.DialTimeout(network, addr, time.Second*3)
+	}
+	f := func() (cont bool, err error) {
+		var client *turnpike.Client
+		client, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
 		if err != nil {
-			return err
+			return
 		}
-		if _, err := client.JoinRealm("realm1", nil); err != nil {
-			return err
+		defer func() {
+			go client.Close()
+		}()
+		if _, err = client.JoinRealm("realm1", nil); err != nil {
+			return
 		}
-		if err := client.Subscribe("ticker", nil, makeTickerSubHandler(updatesCh)); err != nil {
-			return err
+		if err = client.Subscribe("ticker", nil, makeTickerSubHandler(updatesCh)); err != nil {
+			return
 		}
 		val, ok := <-stopCh
-		client.Close()
 		if val || !ok {
-			return nil
+			return
+		}
+		return true, nil
+	}
+	for {
+		if cont, err := f(); !cont {
+			return err
 		}
 	}
 }
