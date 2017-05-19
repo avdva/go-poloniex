@@ -52,7 +52,7 @@ func (c *client) doTimeoutRequest(timer *time.Timer, req *http.Request) (*http.R
 
 func (c *client) makeReq(method, resource, payload string, authNeeded bool, respCh chan<- []byte, errCh chan<- error) {
 	body := []byte{}
-	connectTimer := time.NewTimer(DEFAULT_HTTPCLIENT_TIMEOUT * time.Second)
+	connectTimer := time.NewTimer(DEFAULT_HTTPCLIENT_TIMEOUT)
 
 	var rawurl string
 	if strings.HasPrefix(resource, "http") {

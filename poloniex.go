@@ -15,7 +15,7 @@ import (
 const (
 	API_BASE                   = "https://poloniex.com/"  // Poloniex API endpoint
 	API_WS                     = "wss://api.poloniex.com" // Poloniex WS endpoint
-	DEFAULT_HTTPCLIENT_TIMEOUT = 30                       // HTTP client timeout
+	DEFAULT_HTTPCLIENT_TIMEOUT = 30 * time.Second         // HTTP client timeout
 )
 
 // New return a instantiate poloniex struct
@@ -126,7 +126,7 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
 	tmDialer := func(network, addr string) (net.Conn, error) {
-		return net.DialTimeout(network, addr, time.Second*3)
+		return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
 	}
 	f := func() (cont bool, err error) {
 		var client *turnpike.Client
@@ -164,7 +164,7 @@ func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd,
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
 	tmDialer := func(network, addr string) (net.Conn, error) {
-		return net.DialTimeout(network, addr, time.Second*3)
+		return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
 	}
 	f := func() (cont bool, err error) {
 		var client *turnpike.Client
