@@ -125,32 +125,8 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
-	tmDialer := func(network, addr string) (net.Conn, error) {
-		return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
-	}
-	f := func() (cont bool, err error) {
-		var client *turnpike.Client
-		client, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
-		if err != nil {
-			return
-		}
-		defer func() {
-			go client.Close()
-		}()
-		if _, err = client.JoinRealm("realm1", nil); err != nil {
-			return
-		}
-		if err = client.Subscribe(symbol, nil, makeOBookSubHandler(updatesCh)); err != nil {
-			return
-		}
-		val, ok := <-stopCh
-		if val || !ok {
-			return
-		}
-		return true, nil
-	}
 	for {
-		if cont, err := f(); !cont {
+		if cont, err := wampConnect(symbol, makeOBookSubHandler(updatesCh), stopCh); !cont {
 			return err
 		}
 	}
@@ -163,33 +139,43 @@ func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd,
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
-	tmDialer := func(network, addr string) (net.Conn, error) {
-		return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
-	}
-	f := func() (cont bool, err error) {
-		var client *turnpike.Client
-		client, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
-		if err != nil {
-			return
-		}
-		defer func() {
-			go client.Close()
-		}()
-		if _, err = client.JoinRealm("realm1", nil); err != nil {
-			return
-		}
-		if err = client.Subscribe("ticker", nil, makeTickerSubHandler(updatesCh)); err != nil {
-			return
-		}
-		val, ok := <-stopCh
-		if val || !ok {
-			return
-		}
-		return true, nil
-	}
 	for {
-		if cont, err := f(); !cont {
+		if cont, err := wampConnect("ticker", makeTickerSubHandler(updatesCh), stopCh); !cont {
 			return err
+		}
+	}
+}
+
+func tmDialer(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
+}
+
+func wampConnect(topic string, handler turnpike.EventHandler, stopCh <-chan bool) (cont bool, err error) {
+	var client *turnpike.Client
+	client, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
+	if err != nil {
+		return
+	}
+	defer func() {
+		go client.Close()
+	}()
+	ch := make(chan error, 1)
+	go func() {
+		var err error
+		if _, err = client.JoinRealm("realm1", nil); err == nil {
+			err = client.Subscribe(topic, nil, handler)
+		}
+		ch <- err
+	}()
+	for {
+		select {
+		case err = <-ch:
+			if err != nil {
+				return
+			}
+			ch = nil
+		case val, ok := <-stopCh:
+			return ok && !val, nil
 		}
 	}
 }
