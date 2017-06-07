@@ -59,6 +59,7 @@ type MarketUpd struct {
 	Trades []TradeUpd
 }
 
+// TickerUpd is a ticker update message.
 type TickerUpd struct {
 	Pair string
 	Ticker

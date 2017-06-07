@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/avdva/turnpike"
 )
 
 type client struct {
@@ -17,6 +21,9 @@ type client struct {
 	apiSecret  string
 	httpClient *http.Client
 	throttle   <-chan time.Time
+
+	m        sync.RWMutex
+	wsClient *turnpike.Client
 }
 
 var (
@@ -26,7 +33,7 @@ var (
 
 // NewClient return a new Poloniex HTTP client
 func NewClient(apiKey, apiSecret string) (c *client) {
-	return &client{apiKey, apiSecret, &http.Client{}, time.Tick(reqInterval)}
+	return &client{apiKey: apiKey, apiSecret: apiSecret, httpClient: &http.Client{}, throttle: time.Tick(reqInterval)}
 }
 
 // doTimeoutRequest do a HTTP request with timeout
@@ -126,4 +133,71 @@ func (c *client) do(method, resource, payload string, authNeeded bool) (response
 	response = <-respCh
 	err = <-errCh
 	return
+}
+
+func tmDialer(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
+}
+
+func (c *client) checkWsClient() (*turnpike.Client, error) {
+	c.m.RLock()
+	cl := c.wsClient
+	c.m.RUnlock()
+	if cl != nil {
+		return cl, nil
+	}
+	var err error
+	cl, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = cl.JoinRealm("realm1", nil); err != nil {
+		cl.Close()
+		return nil, err
+	}
+	c.m.Lock()
+	if c.wsClient == nil {
+		c.wsClient = cl
+	} else {
+		cl.Close()
+		cl = c.wsClient
+	}
+	c.m.Unlock()
+	return cl, nil
+}
+
+func (c *client) wsReset() error {
+	c.m.Lock()
+	cl := c.wsClient
+	c.wsClient = nil
+	c.m.Unlock()
+	if cl != nil {
+		return cl.Close()
+	}
+	return nil
+}
+
+func (c *client) wsConnect(topic string, handler turnpike.EventHandler, stopCh <-chan bool) (cont bool, err error) {
+	client, err := c.checkWsClient()
+	if err != nil {
+		return
+	}
+	ch := make(chan error, 1)
+	defer func() {
+		go client.Unsubscribe(topic)
+	}()
+	go func() {
+		ch <- client.Subscribe(topic, nil, handler)
+	}()
+	for {
+		select {
+		case err = <-ch:
+			if err != nil {
+				return
+			}
+			ch = nil
+		case val, ok := <-stopCh:
+			return ok && !val, nil
+		}
+	}
 }
