@@ -151,6 +151,8 @@ func (c *client) checkWsClient() (*turnpike.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	doneCh := make(chan bool)
+	cl.ReceiveDone = doneCh
 	if _, err = cl.JoinRealm("realm1", nil); err != nil {
 		cl.Close()
 		return nil, err
@@ -158,11 +160,20 @@ func (c *client) checkWsClient() (*turnpike.Client, error) {
 	c.m.Lock()
 	if c.wsClient == nil {
 		c.wsClient = cl
+		c.m.Unlock()
+		go func() {
+			<-doneCh
+			c.m.Lock()
+			if c.wsClient == cl {
+				c.wsClient = nil
+			}
+			c.m.Unlock()
+		}()
 	} else {
-		cl.Close()
 		cl = c.wsClient
+		c.m.Unlock()
+		cl.Close()
 	}
-	c.m.Unlock()
 	return cl, nil
 }
 
@@ -184,7 +195,9 @@ func (c *client) wsConnect(topic string, handler turnpike.EventHandler, stopCh <
 	}
 	ch := make(chan error, 1)
 	defer func() {
-		go client.Unsubscribe(topic)
+		if err != nil {
+			go client.Unsubscribe(topic)
+		}
 	}()
 	go func() {
 		ch <- client.Subscribe(topic, nil, handler)
@@ -196,8 +209,12 @@ func (c *client) wsConnect(topic string, handler turnpike.EventHandler, stopCh <
 				return
 			}
 			ch = nil
+		case <-client.ReceiveDone:
+			err = errors.New("client closed")
+			return
 		case val, ok := <-stopCh:
-			return ok && !val, nil
+			cont = ok && !val
+			return
 		}
 	}
 }
