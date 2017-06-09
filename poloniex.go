@@ -134,6 +134,11 @@ func (b *Poloniex) UnsubscribeAll() error {
 	return b.client.wsReset()
 }
 
+// Close closes ws connections.
+func (b *Poloniex) Close() error {
+	return b.client.close()
+}
+
 // SubscribeTicker subscribes for ticker via WAMP.
 // Send to, or close stopCh to cancel subscribtion.
 //	updatesCh - a channel for ticker updates.

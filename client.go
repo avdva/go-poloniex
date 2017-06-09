@@ -22,8 +22,10 @@ type client struct {
 	httpClient *http.Client
 	throttle   <-chan time.Time
 
-	m        sync.RWMutex
+	m        sync.Mutex
+	cv       *sync.Cond
 	wsClient *turnpike.Client
+	wsChan   chan bool
 }
 
 var (
@@ -33,7 +35,16 @@ var (
 
 // NewClient return a new Poloniex HTTP client
 func NewClient(apiKey, apiSecret string) (c *client) {
-	return &client{apiKey: apiKey, apiSecret: apiSecret, httpClient: &http.Client{}, throttle: time.Tick(reqInterval)}
+	result := &client{
+		apiKey:     apiKey,
+		apiSecret:  apiSecret,
+		httpClient: &http.Client{},
+		throttle:   time.Tick(reqInterval),
+		wsChan:     make(chan bool, 1),
+	}
+	result.cv = sync.NewCond(&result.m)
+	go result.wsConnLoop()
+	return result
 }
 
 // doTimeoutRequest do a HTTP request with timeout
@@ -139,42 +150,73 @@ func tmDialer(network, addr string) (net.Conn, error) {
 	return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
 }
 
-func (c *client) checkWsClient() (*turnpike.Client, error) {
-	c.m.RLock()
-	cl := c.wsClient
-	c.m.RUnlock()
-	if cl != nil {
-		return cl, nil
+func (c *client) close() error {
+	c.m.Lock()
+	if c.wsChan != nil {
+		close(c.wsChan)
+		c.wsChan = nil
 	}
-	var err error
-	cl, err = turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
+	c.m.Unlock()
+	return c.wsReset()
+}
+
+func (c *client) makeWsClient() (*turnpike.Client, error) {
+	cl, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
 	if err != nil {
 		return nil, err
 	}
-	doneCh := make(chan bool)
-	cl.ReceiveDone = doneCh
 	if _, err = cl.JoinRealm("realm1", nil); err != nil {
 		cl.Close()
 		return nil, err
 	}
-	c.m.Lock()
-	if c.wsClient == nil {
-		c.wsClient = cl
+	cl.ReceiveDone = make(chan bool)
+	go func() {
+		<-cl.ReceiveDone
+		c.m.Lock()
+		if c.wsClient == cl {
+			c.wsClient = nil
+		}
 		c.m.Unlock()
-		go func() {
-			<-doneCh
-			c.m.Lock()
-			if c.wsClient == cl {
-				c.wsClient = nil
-			}
-			c.m.Unlock()
-		}()
-	} else {
-		cl = c.wsClient
-		c.m.Unlock()
-		cl.Close()
-	}
+	}()
 	return cl, nil
+}
+
+func (c *client) wsConnLoop() {
+	for range c.wsChan {
+		c.m.Lock()
+		cl := c.wsClient
+		c.m.Unlock()
+		if cl != nil {
+			continue
+		}
+		if cl, err := c.makeWsClient(); err == nil {
+			c.m.Lock()
+			c.wsClient = cl
+			c.m.Unlock()
+		}
+		// notify all clients about connect attempt, successful or not.
+		c.cv.Broadcast()
+	}
+}
+
+func (c *client) checkWsClient() (*turnpike.Client, error) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	// do not wait for connection forever, return an error on bad attempt.
+	if c.wsClient == nil {
+		if c.wsChan == nil {
+			return nil, errors.New("client closed")
+		}
+		select {
+		case c.wsChan <- true:
+		default:
+		}
+		c.cv.Wait()
+		if c.wsClient == nil {
+			return nil, errors.New("connection error")
+		}
+	}
+	return c.wsClient, nil
 }
 
 func (c *client) wsReset() error {
