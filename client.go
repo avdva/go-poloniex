@@ -7,8 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
+	"log"
+
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,10 +21,12 @@ import (
 )
 
 type client struct {
-	apiKey     string
-	apiSecret  string
-	httpClient *http.Client
-	throttle   <-chan time.Time
+	apiKey      string
+	apiSecret   string
+	httpClient  *http.Client
+	throttle    <-chan time.Time
+	httpTimeout time.Duration
+	debug       bool
 
 	m        sync.Mutex
 	cv       *sync.Cond
@@ -36,15 +42,57 @@ var (
 // NewClient return a new Poloniex HTTP client
 func NewClient(apiKey, apiSecret string) (c *client) {
 	result := &client{
-		apiKey:     apiKey,
-		apiSecret:  apiSecret,
-		httpClient: &http.Client{},
-		throttle:   time.Tick(reqInterval),
-		wsChan:     make(chan bool, 1),
+		apiKey:      apiKey,
+		apiSecret:   apiSecret,
+		httpClient:  &http.Client{},
+		throttle:    time.Tick(reqInterval),
+		httpTimeout: 30 * time.Second,
+		wsChan:      make(chan bool, 1),
 	}
 	result.cv = sync.NewCond(&result.m)
 	go result.wsConnLoop()
 	return result
+}
+
+// NewClientWithCustomTimeout returns a new Poloniex HTTP client with custom timeout
+func NewClientWithCustomTimeout(apiKey, apiSecret string, timeout time.Duration) (c *client) {
+	result := &client{
+		apiKey:      apiKey,
+		apiSecret:   apiSecret,
+		httpClient:  &http.Client{},
+		throttle:    time.Tick(reqInterval),
+		httpTimeout: timeout,
+		wsChan:      make(chan bool, 1),
+	}
+	result.cv = sync.NewCond(&result.m)
+	go result.wsConnLoop()
+	return result
+}
+
+func (c client) dumpRequest(r *http.Request) {
+	if r == nil {
+		log.Print("dumpReq ok: <nil>")
+		return
+	}
+	dump, err := httputil.DumpRequest(r, true)
+	if err != nil {
+		log.Print("dumpReq err:", err)
+	} else {
+		log.Print("dumpReq ok:", string(dump))
+	}
+}
+
+func (c client) dumpResponse(r *http.Response) {
+	if r == nil {
+		log.Print("dumpResponse ok: <nil>")
+		return
+	}
+	dump, err := httputil.DumpResponse(r, true)
+	if err != nil {
+		log.Print("dumpResponse err:", err)
+	} else {
+		log.Print("dumpResponse ok:", string(dump))
+	}
 }
 
 // doTimeoutRequest do a HTTP request with timeout
@@ -56,7 +104,13 @@ func (c *client) doTimeoutRequest(timer *time.Timer, req *http.Request) (*http.R
 	}
 	done := make(chan result, 1)
 	go func() {
+		if c.debug {
+			c.dumpRequest(req)
+		}
 		resp, err := c.httpClient.Do(req)
+		if c.debug {
+			c.dumpResponse(resp)
+		}
 		done <- result{resp, err}
 	}()
 	// Wait for the read or the timeout
@@ -68,9 +122,9 @@ func (c *client) doTimeoutRequest(timer *time.Timer, req *http.Request) (*http.R
 	}
 }
 
-func (c *client) makeReq(method, resource, payload string, authNeeded bool, respCh chan<- []byte, errCh chan<- error) {
+func (c *client) makeReq(method, resource string, payload map[string]string, authNeeded bool, respCh chan<- []byte, errCh chan<- error) {
 	body := []byte{}
-	connectTimer := time.NewTimer(DEFAULT_HTTPCLIENT_TIMEOUT)
+	connectTimer := time.NewTimer(c.httpTimeout)
 
 	var rawurl string
 	if strings.HasPrefix(resource, "http") {
@@ -79,34 +133,41 @@ func (c *client) makeReq(method, resource, payload string, authNeeded bool, resp
 		rawurl = fmt.Sprintf("%s/%s", API_BASE, resource)
 	}
 
-	req, err := http.NewRequest(method, rawurl, strings.NewReader(payload))
+	formValues := url.Values{}
+	for key, value := range payload {
+		formValues.Set(key, value)
+	}
+	formData := formValues.Encode()
+
+	req, err := http.NewRequest(method, rawurl, strings.NewReader(formData))
 	if err != nil {
 		respCh <- body
 		errCh <- errors.New("You need to set API Key and API Secret to call this method")
 		return
 	}
-	if method == "POST" || method == "PUT" {
-		req.Header.Add("Content-Type", "application/json;charset=utf-8")
-	}
-	req.Header.Add("Accept", "application/json")
 
-	// Auth
 	if authNeeded {
 		if len(c.apiKey) == 0 || len(c.apiSecret) == 0 {
 			respCh <- body
 			errCh <- errors.New("You need to set API Key and API Secret to call this method")
 			return
 		}
-		nonce := time.Now().UnixNano()
-		q := req.URL.Query()
-		q.Set("apikey", c.apiKey)
-		q.Set("nonce", fmt.Sprintf("%d", nonce))
-		req.URL.RawQuery = q.Encode()
+
 		mac := hmac.New(sha512.New, []byte(c.apiSecret))
-		_, err = mac.Write([]byte(req.URL.String()))
+		_, err := mac.Write([]byte(formData))
+		if err != nil {
+			errCh <- err
+		}
 		sig := hex.EncodeToString(mac.Sum(nil))
-		req.Header.Add("apisign", sig)
+		req.Header.Add("Key", c.apiKey)
+		req.Header.Add("Sign", sig)
 	}
+
+	if method == "POST" || method == "PUT" {
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	req.Header.Add("Accept", "application/json")
 
 	resp, err := c.doTimeoutRequest(connectTimer, req)
 	if err != nil {
@@ -136,7 +197,7 @@ func (c *client) makeReq(method, resource, payload string, authNeeded bool, resp
 }
 
 // do prepare and process HTTP request to Poloniex API
-func (c *client) do(method, resource, payload string, authNeeded bool) (response []byte, err error) {
+func (c *client) do(method, resource string, payload map[string]string, authNeeded bool) (response []byte, err error) {
 	respCh := make(chan []byte)
 	errCh := make(chan error)
 	<-c.throttle
@@ -146,117 +207,14 @@ func (c *client) do(method, resource, payload string, authNeeded bool) (response
 	return
 }
 
-func tmDialer(network, addr string) (net.Conn, error) {
-	return net.DialTimeout(network, addr, DEFAULT_HTTPCLIENT_TIMEOUT)
-}
+// doCommand prepares an authorized command-request for Poloniex's tradingApi
+func (c *client) doCommand(command string, payload map[string]string) (response []byte, err error) {
+	if payload == nil {
+		payload = make(map[string]string)
+	}
 
-func (c *client) close() error {
-	c.m.Lock()
-	if c.wsChan != nil {
-		close(c.wsChan)
-		c.wsChan = nil
-	}
-	c.m.Unlock()
-	return c.wsReset()
-}
+	payload["command"] = command
+	payload["nonce"] = strconv.FormatInt(time.Now().UnixNano(), 10)
 
-func (c *client) makeWsClient() (*turnpike.Client, error) {
-	cl, err := turnpike.NewWebsocketClient(turnpike.JSONNUMBER, API_WS, nil, tmDialer)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = cl.JoinRealm("realm1", nil); err != nil {
-		cl.Close()
-		return nil, err
-	}
-	cl.ReceiveDone = make(chan bool)
-	go func() {
-		<-cl.ReceiveDone
-		c.m.Lock()
-		if c.wsClient == cl {
-			c.wsClient = nil
-		}
-		c.m.Unlock()
-	}()
-	return cl, nil
-}
-
-func (c *client) wsConnLoop() {
-	for range c.wsChan {
-		c.m.Lock()
-		cl := c.wsClient
-		c.m.Unlock()
-		if cl != nil {
-			continue
-		}
-		if cl, err := c.makeWsClient(); err == nil {
-			c.m.Lock()
-			c.wsClient = cl
-			c.m.Unlock()
-		}
-		// notify all clients about connect attempt, successful or not.
-		c.cv.Broadcast()
-	}
-}
-
-func (c *client) checkWsClient() (*turnpike.Client, error) {
-	c.m.Lock()
-	defer c.m.Unlock()
-	// do not wait for connection forever, return an error on bad attempt.
-	if c.wsClient == nil {
-		if c.wsChan == nil {
-			return nil, errors.New("client closed")
-		}
-		select {
-		case c.wsChan <- true:
-		default:
-		}
-		c.cv.Wait()
-		if c.wsClient == nil {
-			return nil, errors.New("connection error")
-		}
-	}
-	return c.wsClient, nil
-}
-
-func (c *client) wsReset() error {
-	c.m.Lock()
-	cl := c.wsClient
-	c.wsClient = nil
-	c.m.Unlock()
-	if cl != nil {
-		return cl.Close()
-	}
-	return nil
-}
-
-func (c *client) wsConnect(topic string, handler turnpike.EventHandler, stopCh <-chan bool) (cont bool, err error) {
-	client, err := c.checkWsClient()
-	if err != nil {
-		return
-	}
-	ch := make(chan error, 1)
-	defer func() {
-		if err != nil {
-			go client.Unsubscribe(topic)
-		}
-	}()
-	go func() {
-		ch <- client.Subscribe(topic, nil, handler)
-	}()
-	for {
-		select {
-		case err = <-ch:
-			if err != nil {
-				return
-			}
-			ch = nil
-		case <-client.ReceiveDone:
-			err = errors.New("client closed")
-			return
-		case val, ok := <-stopCh:
-			cont = ok && !val
-			return
-		}
-	}
+	return c.do("POST", "tradingApi", payload, true)
 }
