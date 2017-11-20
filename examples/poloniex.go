@@ -1,8 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"github.com/jyap808/go-poloniex"
+	"github.com/avdva/go-poloniex"
 )
 
 const (
@@ -12,17 +11,17 @@ const (
 
 func main() {
 	// Poloniex client
-	poloniex := poloniex.New(API_KEY, API_SECRET)
+	client := poloniex.New(API_KEY, API_SECRET)
 
 	// Get Ticker (BTC-VTC)
 	/*
-		ticker, err := poloniex.GetTicker("BTC-DRK")
+		ticker, err := client.GetTicker("BTC-DRK")
 		fmt.Println(err, ticker)
 	*/
 
 	// Get Tickers
 	/*
-		tickers, err := poloniex.GetTickers()
+		tickers, err := client.GetTickers()
 		if err != nil {
 			fmt.Println("Error:", err)
 		} else {
@@ -41,7 +40,7 @@ func main() {
 
 	// Get Volumes
 	/*
-		volumes, err := poloniex.GetVolumes()
+		volumes, err := client.GetVolumes()
 		if err != nil {
 			fmt.Println("Error:", err)
 		} else {
@@ -64,19 +63,19 @@ func main() {
 
 	// Get markets
 	/*
-		markets, err := poloniex.GetMarkets()
+		markets, err := client.GetMarkets()
 		fmt.Println(err, markets)
 	*/
 
 	// Get orders book
 	/*
-		orderBook, err := poloniex.GetOrderBook("BTC-DRK", "both", 100)
+		orderBook, err := client.GetOrderBook("BTC-DRK", "both", 100)
 		fmt.Println(err, orderBook)
 	*/
 
 	// Market history
 	/*
-		marketHistory, err := poloniex.GetMarketHistory("BTC-DRK", 100)
+		marketHistory, err := client.GetMarketHistory("BTC-DRK", 100)
 		for _, trade := range marketHistory {
 			fmt.Println(err, trade.Timestamp.String(), trade.Quantity, trade.Price)
 		}
@@ -86,75 +85,93 @@ func main() {
 
 	// BuyLimit
 	/*
-		uuid, err := poloniex.BuyLimit("BTC-DOGE", 1000, 0.00000102)
+		uuid, err := client.BuyLimit("BTC-DOGE", 1000, 0.00000102)
 		fmt.Println(err, uuid)
 	*/
 
 	// BuyMarket
 	/*
-		uuid, err := poloniex.BuyLimit("BTC-DOGE", 1000)
+		uuid, err := client.BuyLimit("BTC-DOGE", 1000)
 		fmt.Println(err, uuid)
 	*/
 
 	// Sell limit
 	/*
-		uuid, err := poloniex.SellLimit("BTC-DOGE", 1000, 0.00000115)
+		uuid, err := client.SellLimit("BTC-DOGE", 1000, 0.00000115)
 		fmt.Println(err, uuid)
 	*/
 
 	// Cancel Order
 	/*
-		err := poloniex.CancelOrder("e3b4b704-2aca-4b8c-8272-50fada7de474")
+		err := client.CancelOrder("e3b4b704-2aca-4b8c-8272-50fada7de474")
 		fmt.Println(err)
 	*/
 
 	// Get open orders
 	/*
-		orders, err := poloniex.GetOpenOrders("BTC-DOGE")
+		orders, err := client.GetOpenOrders("BTC-DOGE")
 		fmt.Println(err, orders)
 	*/
 
 	// Account
 	// Get balances
 	/*
-		balances, err := poloniex.GetBalances()
+		balances, err := client.GetBalances()
 		fmt.Println(err, balances)
 	*/
 
 	// Get balance
 	/*
-		balance, err := poloniex.GetBalance("DOGE")
+		balance, err := client.GetBalance("DOGE")
 		fmt.Println(err, balance)
 	*/
 
 	// Get address
 	/*
-		address, err := poloniex.GetDepositAddress("QBC")
+		address, err := client.GetDepositAddress("QBC")
 		fmt.Println(err, address)
 	*/
 
 	// WithDraw
 	/*
-		whitdrawUuid, err := poloniex.Withdraw("QYQeWgSnxwtTuW744z7Bs1xsgszWaFueQc", "QBC", 1.1)
+		whitdrawUuid, err := client.Withdraw("QYQeWgSnxwtTuW744z7Bs1xsgszWaFueQc", "QBC", 1.1)
 		fmt.Println(err, whitdrawUuid)
 	*/
 
 	// Get order history
 	/*
-		orderHistory, err := poloniex.GetOrderHistory("BTC-DOGE", 10)
+		orderHistory, err := client.GetOrderHistory("BTC-DOGE", 10)
 		fmt.Println(err, orderHistory)
 	*/
 
 	// Get getwithdrawal history
 	/*
-		withdrawalHistory, err := poloniex.GetWithdrawalHistory("all", 0)
+		withdrawalHistory, err := client.GetWithdrawalHistory("all", 0)
 		fmt.Println(err, withdrawalHistory)
 	*/
 
 	// Get deposit history
 	/*
-		deposits, err := poloniex.GetDepositHistory("all", 0)
+		deposits, err := client.GetDepositHistory("all", 0)
 		fmt.Println(err, deposits)
 	*/
 
+	// Get order book feed.
+	/*
+		updChan := make(chan poloniex.MarketUpd, 128)
+		stopChan := make(chan bool)
+		go func() {
+			for upd := range updChan {
+				fmt.Println(upd)
+			}
+		}()
+		for {
+			err := client.SubscribeOrderBook("USDT_BTC", updChan, stopChan)
+			if err == nil {
+				break
+			}
+			log.Errorf("client: sub error: %v", err)
+			time.Sleep(time.Second)
+		}
+	*/
 }
