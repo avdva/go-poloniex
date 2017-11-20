@@ -1,8 +1,6 @@
 package poloniex
 
-import (
-	"github.com/shopspring/decimal"
-)
+import "github.com/shopspring/decimal"
 
 type Tickers struct {
 	Pair map[string]Ticker
