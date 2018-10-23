@@ -12,7 +12,7 @@ import (
 
 const (
 	API_BASE                   = "https://poloniex.com"  // Poloniex API endpoint
-	API_WS                     = "wss://api.poloniex.com" // Poloniex WS endpoint
+	API_WS                     = "wss://api2.poloniex.com" // Poloniex WS endpoint
 )
 
 // New returns an instantiated poloniex struct
