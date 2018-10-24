@@ -31,6 +31,7 @@ type client struct {
 	m        sync.Mutex
 	cv       *sync.Cond
 	wsClient *turnpike.Client
+	wsErr    error
 	wsChan   chan bool
 }
 

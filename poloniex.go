@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	API_BASE                   = "https://poloniex.com"  // Poloniex API endpoint
-	API_WS                     = "wss://api2.poloniex.com" // Poloniex WS endpoint
+	API_BASE = "https://poloniex.com"    // Poloniex API endpoint
+	API_WS   = "wss://api2.poloniex.com" // Poloniex WS endpoint
 )
 
 // New returns an instantiated poloniex struct
@@ -260,7 +260,7 @@ func (b *Poloniex) Sell(pair string, rate float64, amount float64, tradeType str
 
 func (b *Poloniex) GetOpenOrders(pair string) (openOrders map[string][]OpenOrder, err error) {
 	openOrders = make(map[string][]OpenOrder)
-	r, err := b.client.doCommand("returnOpenOrders", map[string]string{"currencyPair":pair})
+	r, err := b.client.doCommand("returnOpenOrders", map[string]string{"currencyPair": pair})
 	if err != nil {
 		return
 	}

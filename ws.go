@@ -50,11 +50,11 @@ func (c *client) wsConnLoop() {
 		if cl != nil {
 			continue
 		}
-		if cl, err := c.makeWsClient(); err == nil {
-			c.m.Lock()
-			c.wsClient = cl
-			c.m.Unlock()
-		}
+		cl, err := c.makeWsClient()
+		c.m.Lock()
+		c.wsClient = cl
+		c.wsErr = err
+		c.m.Unlock()
 		// notify all clients about connect attempt, successful or not.
 		c.cv.Broadcast()
 	}
@@ -74,7 +74,11 @@ func (c *client) checkWsClient() (*turnpike.Client, error) {
 		}
 		c.cv.Wait()
 		if c.wsClient == nil {
-			return nil, errors.New("connection error")
+			err := c.wsErr
+			if err == nil {
+				err = errors.New("connection error")
+			}
+			return nil, err
 		}
 	}
 	return c.wsClient, nil
