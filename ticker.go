@@ -7,6 +7,7 @@ type Tickers struct {
 }
 
 type Ticker struct {
+	ID            int             `json:"id"`
 	Last          decimal.Decimal `json:"last,string"`
 	LowestAsk     decimal.Decimal `json:"lowestAsk,string"`
 	HighestBid    decimal.Decimal `json:"highestBid,string"`

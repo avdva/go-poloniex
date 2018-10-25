@@ -18,18 +18,19 @@ const (
 // New returns an instantiated poloniex struct
 func New(apiKey, apiSecret string) *Poloniex {
 	client := NewClient(apiKey, apiSecret)
-	return &Poloniex{client}
+	return &Poloniex{client: client, wsClient: newWsClient()}
 }
 
 // New returns an instantiated poloniex struct with custom timeout
 func NewWithCustomTimeout(apiKey, apiSecret string, timeout time.Duration) *Poloniex {
 	client := NewClientWithCustomTimeout(apiKey, apiSecret, timeout)
-	return &Poloniex{client}
+	return &Poloniex{client: client, wsClient: newWsClient()}
 }
 
 // poloniex represent a poloniex client
 type Poloniex struct {
-	client *client
+	client   *client
+	wsClient *wsClient
 }
 
 // set enable/disable http request/response dump
@@ -133,21 +134,17 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
-	for {
-		if cont, err := b.client.wsConnect(symbol, makeOBookSubHandler(updatesCh), stopCh); !cont {
-			return err
-		}
-	}
+	return b.wsClient.subscribe("14")
 }
 
 // UnsubscribeAll cancels all active subscriptions.
 func (b *Poloniex) UnsubscribeAll() error {
-	return b.client.wsReset()
+	return b.wsClient.wsReset()
 }
 
 // Close closes ws connections.
 func (b *Poloniex) Close() error {
-	return b.client.close()
+	return b.wsClient.close()
 }
 
 // SubscribeTicker subscribes for ticker via WAMP.
@@ -157,11 +154,7 @@ func (b *Poloniex) Close() error {
 //		close it or send 'true' to stop subscribtion.
 //		send 'false' to reconnect. May be useful, if updates were stalled.
 func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
-	for {
-		if cont, err := b.client.wsConnect("ticker", makeTickerSubHandler(updatesCh), stopCh); !cont {
-			return err
-		}
-	}
+	return nil
 }
 
 func (b *Poloniex) GetBalances() (balances map[string]Balance, err error) {
