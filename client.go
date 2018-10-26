@@ -14,10 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/avdva/turnpike"
 )
 
 type client struct {
@@ -27,12 +24,6 @@ type client struct {
 	throttle    <-chan time.Time
 	httpTimeout time.Duration
 	debug       bool
-
-	m        sync.Mutex
-	cv       *sync.Cond
-	wsClient *turnpike.Client
-	wsErr    error
-	wsChan   chan bool
 }
 
 var (
@@ -48,10 +39,7 @@ func NewClient(apiKey, apiSecret string) (c *client) {
 		httpClient:  &http.Client{},
 		throttle:    time.Tick(reqInterval),
 		httpTimeout: 30 * time.Second,
-		wsChan:      make(chan bool, 1),
 	}
-	result.cv = sync.NewCond(&result.m)
-	go result.wsConnLoop()
 	return result
 }
 
@@ -63,10 +51,7 @@ func NewClientWithCustomTimeout(apiKey, apiSecret string, timeout time.Duration)
 		httpClient:  &http.Client{},
 		throttle:    time.Tick(reqInterval),
 		httpTimeout: timeout,
-		wsChan:      make(chan bool, 1),
 	}
-	result.cv = sync.NewCond(&result.m)
-	go result.wsConnLoop()
 	return result
 }
 

@@ -1,9 +1,10 @@
 module github.com/avdva/go-poloniex
 
 require (
+	github.com/avdva/sorgo v0.1.0
 	github.com/avdva/turnpike v0.0.0-20171120093857-a21a7f33b9bb
 	github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 // indirect
-	github.com/gorilla/websocket v1.4.0 // indirect
+	github.com/gorilla/websocket v1.4.0
 	github.com/jtolds/gls v4.2.1+incompatible // indirect
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/pkg/errors v0.8.0

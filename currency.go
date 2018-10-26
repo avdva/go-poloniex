@@ -1,13 +1,19 @@
 package poloniex
 
+import (
+	"github.com/shopspring/decimal"
+)
+
 type Currency struct {
-	Name               string  `json:"name"`
-	MaxDailyWithdrawal string  `json:"maxDailyWithdrawal"`
-	TxFee              float64 `json:"txFee,string"`
-	MinConf            int     `json:"minConf"`
-	Disabled           int     `json:"disabled"`
-	Frozen             int     `json:"frozen"`
-	Delisted           int     `json:"delisted"`
+	ID                 int             `json:"id"`
+	Name               string          `json:"name"`
+	MaxDailyWithdrawal decimal.Decimal `json:"maxDailyWithdrawal"`
+	TxFee              decimal.Decimal `json:"txFee"`
+	MinConf            int             `json:"minConf"`
+	DepositAddress     *string         `json:"depositAddress"`
+	Disabled           int             `json:"disabled"`
+	Delisted           int             `json:"delisted"`
+	Frozen             int             `json:"frozen"`
 }
 
 type Currencies struct {
