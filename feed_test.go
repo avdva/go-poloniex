@@ -4,25 +4,36 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSubscribeOB(t *testing.T) {
-	a := assert.New(t)
 	client := New("", "")
-	stopChan := make(chan bool)
+	stopChan := make(chan struct{})
 	updChan := make(chan MarketUpd)
+	ticks, err := client.GetTickers()
+	require.NoError(t, err)
+	cur, found := ticks["USDT_BTC"]
+	require.NotZero(t, found)
+	errCh := make(chan error)
+	defer func() {
+		select {
+		case err := <-errCh:
+			require.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Error("unsubscribe timeout")
+		}
+	}()
 	go func() {
-		a.NoError(client.SubscribeOrderBook("USDT_BTC", updChan, stopChan))
+		err := client.SubscribeOrderBook(cur.ID, updChan, stopChan)
+		require.NoError(t, err)
+		errCh <- err
 	}()
 	tm := time.After(time.Second * 30)
 	msgCount := 0
 	for loop := true; loop; {
 		select {
 		case <-updChan:
-			if msgCount == 0 {
-				stopChan <- false
-			}
 			msgCount++
 			if msgCount >= 3 {
 				loop = false
@@ -37,32 +48,41 @@ func TestSubscribeOB(t *testing.T) {
 	close(stopChan)
 }
 
-func TestSubscribeTicker(t *testing.T) {
-	a := assert.New(t)
+func TestSubscribeOB2(t *testing.T) {
 	client := New("", "")
-	stopChan := make(chan bool)
-	updChan := make(chan TickerUpd)
+	stopChan := make(chan struct{})
+	updChan := make(chan MarketUpd)
+	ticks, err := client.GetTickers()
+	require.NoError(t, err)
+	cur, found := ticks["USDT_BTC"]
+	require.NotZero(t, found)
+	errCh := make(chan error)
+	defer func() {
+		select {
+		case err := <-errCh:
+			require.NoError(t, err)
+		case <-time.After(3 * time.Second):
+			t.Error("unsubscribe timeout")
+		}
+	}()
 	go func() {
-		a.NoError(client.SubscribeTicker(updChan, stopChan))
+		err := client.SubscribeOrderBook(cur.ID, updChan, stopChan)
+		require.NoError(t, err)
+		errCh <- err
 	}()
 	tm := time.After(time.Second * 30)
 	msgCount := 0
 	for loop := true; loop; {
 		select {
 		case <-updChan:
-			if msgCount == 0 {
-				stopChan <- false
-			}
 			msgCount++
-			if msgCount >= 3 {
-				loop = false
-			}
+			loop = false
 		case <-tm:
 			loop = false
 		}
 	}
-	if msgCount < 3 {
-		t.Errorf("got less, than 3 messages: %d", msgCount)
+	if msgCount < 1 {
+		t.Errorf("got less, than 1 messages: %d", msgCount)
 	}
-	close(stopChan)
+	require.NoError(t, client.UnsubscribeAll())
 }

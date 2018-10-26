@@ -49,6 +49,8 @@ type TradeUpd struct {
 type MarketUpd struct {
 	// Seq is constantly increasing number.
 	Seq int64
+	// Initial indicates, that it's the entire obook snapshot.
+	Initial bool
 	// Obooks - updates of an order book.
 	Obooks []OrderBookUpd
 	// Trades - new trades.

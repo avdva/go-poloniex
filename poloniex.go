@@ -128,33 +128,21 @@ func (b *Poloniex) ChartData(currencyPair string, period int, start, end time.Ti
 }
 
 // SubscribeOrderBook subscribes for trades and order book updates via WAMP.
-//	symbol - a symbol you are interested in.
+//	symbol - a symbol id you are interested in.
 //	updatesCh - a channel for market updates.
-//	stopCh - a channel to cancel or reset ws subscribtion.
-//		close it or send 'true' to stop subscribtion.
-//		send 'false' to reconnect. May be useful, if updates were stalled.
-func (b *Poloniex) SubscribeOrderBook(symbol string, updatesCh chan<- MarketUpd, stopCh <-chan bool) error {
-	return b.wsClient.subscribe("14")
+//	stopCh - a channel to stop ws subscribtion. send to, or close it.
+func (b *Poloniex) SubscribeOrderBook(symbolID int, updatesCh chan<- MarketUpd, stopCh <-chan struct{}) error {
+	return b.wsClient.subscribeMarketUpdates(symbolID, updatesCh, stopCh)
 }
 
 // UnsubscribeAll cancels all active subscriptions.
 func (b *Poloniex) UnsubscribeAll() error {
-	return b.wsClient.wsReset()
+	return b.wsClient.closeConn()
 }
 
 // Close closes ws connections.
 func (b *Poloniex) Close() error {
 	return b.wsClient.close()
-}
-
-// SubscribeTicker subscribes for ticker via WAMP.
-// Send to, or close stopCh to cancel subscribtion.
-//	updatesCh - a channel for ticker updates.
-//	stopCh - a channel to cancel or reset ws subscribtion.
-//		close it or send 'true' to stop subscribtion.
-//		send 'false' to reconnect. May be useful, if updates were stalled.
-func (b *Poloniex) SubscribeTicker(updatesCh chan<- TickerUpd, stopCh <-chan bool) error {
-	return nil
 }
 
 func (b *Poloniex) GetBalances() (balances map[string]Balance, err error) {

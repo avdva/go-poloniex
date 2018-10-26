@@ -5,7 +5,7 @@ import (
 )
 
 type Currency struct {
-	ID                 string          `json:"id"`
+	ID                 int             `json:"id"`
 	Name               string          `json:"name"`
 	MaxDailyWithdrawal decimal.Decimal `json:"maxDailyWithdrawal"`
 	TxFee              decimal.Decimal `json:"txFee"`

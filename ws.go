@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
+	"github.com/avdva/sorgo/async"
 	"github.com/gorilla/websocket"
 	"github.com/mitchellh/mapstructure"
 	"github.com/shopspring/decimal"
@@ -17,7 +19,7 @@ type wsClient struct {
 	conn   *websocket.Conn
 	wsErr  error
 	wsChan chan bool
-	subs   map[string]struct{}
+	subs   map[int]wsSub
 }
 
 type wsMessage struct {
@@ -26,9 +28,15 @@ type wsMessage struct {
 	data      [][]interface{}
 }
 
+type wsSub struct {
+	handler func(interface{})
+	errChan chan error
+}
+
 func newWsClient() *wsClient {
 	result := &wsClient{
 		wsChan: make(chan bool, 1),
+		subs:   make(map[int]wsSub),
 	}
 	result.cv = sync.NewCond(&result.m)
 	go result.wsConnLoop()
@@ -42,7 +50,7 @@ func (c *wsClient) close() error {
 		c.wsChan = nil
 	}
 	c.m.Unlock()
-	return c.wsReset()
+	return c.closeConn()
 }
 
 func (c *wsClient) makeWsClient() (*websocket.Conn, error) {
@@ -95,12 +103,29 @@ func (c *wsClient) checkWsClient() (*websocket.Conn, error) {
 }
 
 func (c *wsClient) readLoop(conn *websocket.Conn) {
-	defer c.wsReset()
+	hb := make(chan struct{})
+	defer c.closeConn()
+	defer close(hb)
+	go func() {
+		const hbTimeout = 5 * time.Second
+		for {
+			select {
+			case _, ok := <-hb:
+				if !ok {
+					return
+				}
+			case <-time.After(hbTimeout):
+				c.closeConn()
+				return
+			}
+		}
+	}()
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			return
 		}
+		hb <- struct{}{}
 		if err := c.handleMessage(message); err != nil {
 			log.Errorf("message handling error: %v", err)
 		}
@@ -113,11 +138,14 @@ func (c *wsClient) handleMessage(message []byte) error {
 	if err := json.Unmarshal(message, &arr); err != nil {
 		return err
 	}
-	c.parseMessage(msg)
-	return nil
+	return c.parseMessage(msg)
 }
 
-func (c *wsClient) parseMessage(msg wsMessage) {
+func (c *wsClient) parseMessage(msg wsMessage) error {
+	id, err := msg.channelID.Int64()
+	if err != nil {
+		return err
+	}
 	var mu MarketUpd
 	for _, el := range msg.data {
 		if len(el) < 2 {
@@ -136,6 +164,16 @@ func (c *wsClient) parseMessage(msg wsMessage) {
 			}
 		}
 	}
+	if len(mu.Obooks)+len(mu.Trades) == 0 {
+		return nil
+	}
+	c.m.Lock()
+	handler := c.subs[int(id)].handler
+	c.m.Unlock()
+	if handler != nil {
+		handler(mu)
+	}
+	return nil
 }
 
 func (c *wsClient) handleObookOrTrades(typ string, i []interface{}, mu *MarketUpd) error {
@@ -143,6 +181,7 @@ func (c *wsClient) handleObookOrTrades(typ string, i []interface{}, mu *MarketUp
 	case "i":
 		updates, err := c.parseObookInitial(i[1])
 		if err == nil {
+			mu.Initial = true
 			mu.Obooks = updates
 		}
 		return err
@@ -214,32 +253,97 @@ func (c *wsClient) parseObookInitial(i interface{}) ([]OrderBookUpd, error) {
 	return updates, nil
 }
 
-func (c *wsClient) wsReset() error {
+func (c *wsClient) closeConn() error {
 	c.m.Lock()
 	conn := c.conn
 	c.conn = nil
+	for _, sub := range c.subs {
+		asyncErr(sub.errChan, nil)
+	}
 	c.m.Unlock()
 	if conn != nil {
-		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		async.DoWithTimeout(func() error {
+			return conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		}, func(e error) {
+			log.Warnf("timeout writing ws close message")
+		}, 2*time.Second)
 		return conn.Close()
 	}
 	return nil
 }
 
-func (c *wsClient) cmd(command, channel string) error {
+func (c *wsClient) cmd(command string, channel int) error {
 	client, err := c.checkWsClient()
 	if err != nil {
 		return err
 	}
-	m := map[string]string{
+	m := map[string]interface{}{
 		"command": command,
 		"channel": channel,
 	}
 	return client.WriteJSON(m)
 }
 
-func (c *wsClient) subscribe(channel string) error {
-	c.cmd("subscribe", "BTC_BTS")
-	c.cmd("subscribe", "14")
-	return nil
+func (c *wsClient) makeMarektUpdateHandler(updatesCh chan<- MarketUpd) func(interface{}) {
+	return func(i interface{}) {
+		mu, ok := i.(MarketUpd)
+		if !ok {
+			return
+		}
+		select {
+		case updatesCh <- mu:
+		default:
+		}
+	}
+}
+
+func (c *wsClient) unsubscribeChan(id int) {
+	err := async.DoWithTimeout(func() error {
+		return c.cmd("unsubscribe", id)
+	}, func(err error) {
+		c.m.Lock()
+		sub, found := c.subs[id]
+		if found {
+			asyncErr(sub.errChan, errors.New("subscription error"))
+		}
+		c.m.Unlock()
+		log.Warnf("timeout writing ws unsubscribe message. the last error was %v", err)
+	}, 2*time.Second)
+	if err != nil {
+		log.Errorf("unsubscribe error: %v", err)
+	}
+	c.m.Lock()
+	delete(c.subs, id)
+	c.m.Unlock()
+}
+
+func (c *wsClient) subscribeMarketUpdates(id int, updatesCh chan<- MarketUpd, stopCh <-chan struct{}) error {
+	c.m.Lock()
+	if _, found := c.subs[id]; found {
+		c.m.Unlock()
+		return errors.New("already subscribed")
+	}
+	errChan := make(chan error, 1)
+	c.subs[id] = wsSub{
+		handler: c.makeMarektUpdateHandler(updatesCh),
+		errChan: errChan,
+	}
+	c.m.Unlock()
+	defer c.unsubscribeChan(id)
+	if err := c.cmd("subscribe", id); err != nil {
+		return err
+	}
+	select {
+	case <-stopCh:
+		return nil
+	case err := <-errChan:
+		return err
+	}
+}
+
+func asyncErr(ch chan<- error, err error) {
+	select {
+	case ch <- err:
+	default:
+	}
 }

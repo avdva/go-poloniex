@@ -1,6 +1,7 @@
 module github.com/avdva/go-poloniex
 
 require (
+	github.com/avdva/sorgo v0.1.0
 	github.com/avdva/turnpike v0.0.0-20171120093857-a21a7f33b9bb
 	github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 // indirect
 	github.com/gorilla/websocket v1.4.0

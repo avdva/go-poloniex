@@ -1,3 +1,5 @@
+github.com/avdva/sorgo v0.1.0 h1:5knD99wZ3gNQyTDyg+Xcgwt8EB2DG0S/ZHYorvwIMM0=
+github.com/avdva/sorgo v0.1.0/go.mod h1:UQe9eu/B1jljKzTd6NZSPjYoctPYwVhgzby9Gc5QFHM=
 github.com/avdva/turnpike v0.0.0-20171120093857-a21a7f33b9bb h1:NNBbn4jkvcUDpaS/+Z7X6C2P/2CL2FbZkFXrquyGrK8=
 github.com/avdva/turnpike v0.0.0-20171120093857-a21a7f33b9bb/go.mod h1:NPxtyMyRBN7/r/7KqKVIJzTlY+W5gYQGXMhoM62uCm4=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
