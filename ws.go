@@ -263,7 +263,7 @@ func (c *wsClient) parseObookInitial(i interface{}) ([]OrderBookUpd, error) {
 	fill := func(m map[decimal.Decimal]decimal.Decimal, typ OpType) {
 		for price, size := range m {
 			updates = append(updates, OrderBookUpd{
-				Type:  Sell,
+				Type:  typ,
 				Price: price,
 				Size:  size,
 			})
