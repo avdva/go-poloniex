@@ -14,12 +14,13 @@ import (
 )
 
 type wsClient struct {
-	m      sync.Mutex
-	cv     *sync.Cond
-	conn   *websocket.Conn
-	wsErr  error
-	wsChan chan bool
-	subs   map[int]wsSub
+	writeChan chan wsCmd
+	m         sync.Mutex
+	cv        *sync.Cond
+	conn      *websocket.Conn
+	wsErr     error
+	wsChan    chan bool
+	subs      map[int]wsSub
 }
 
 type wsMessage struct {
@@ -33,12 +34,19 @@ type wsSub struct {
 	errChan chan error
 }
 
+type wsCmd struct {
+	message  interface{}
+	resultCh chan error
+}
+
 func newWsClient() *wsClient {
 	result := &wsClient{
-		wsChan: make(chan bool, 1),
-		subs:   make(map[int]wsSub),
+		writeChan: make(chan wsCmd, 16),
+		wsChan:    make(chan bool, 1),
+		subs:      make(map[int]wsSub),
 	}
 	result.cv = sync.NewCond(&result.m)
+	go result.writeLoop()
 	go result.wsConnLoop()
 	return result
 }
@@ -50,7 +58,7 @@ func (c *wsClient) close() error {
 		c.wsChan = nil
 	}
 	c.m.Unlock()
-	return c.closeConn()
+	return c.closeConnWithErr(nil)
 }
 
 func (c *wsClient) makeWsClient() (*websocket.Conn, error) {
@@ -102,30 +110,43 @@ func (c *wsClient) checkWsClient() (*websocket.Conn, error) {
 	return c.conn, nil
 }
 
-func (c *wsClient) readLoop(conn *websocket.Conn) {
-	hb := make(chan struct{})
-	defer c.closeConn()
-	defer close(hb)
-	go func() {
-		const hbTimeout = 5 * time.Second
-		for {
-			select {
-			case _, ok := <-hb:
-				if !ok {
-					return
-				}
-			case <-time.After(hbTimeout):
-				c.closeConn()
+func (c *wsClient) writeLoop() {
+	for cmd := range c.writeChan {
+		conn, err := c.checkWsClient()
+		if err != nil {
+			asyncErr(cmd.resultCh, err)
+			continue
+		}
+		asyncErr(cmd.resultCh, conn.WriteJSON(cmd.message))
+	}
+}
+
+func (c *wsClient) wsTimeout(hbChan chan struct{}) {
+	const hbTimeout = 5 * time.Second
+	for {
+		select {
+		case _, ok := <-hbChan:
+			if !ok {
 				return
 			}
+		case <-time.After(hbTimeout):
+			c.closeConnWithErr(errors.New("ws timeout"))
+			return
 		}
-	}()
+	}
+}
+
+func (c *wsClient) readLoop(conn *websocket.Conn) {
+	hbChan := make(chan struct{})
+	defer close(hbChan)
+	go c.wsTimeout(hbChan)
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			c.closeConnWithErr(err)
 			return
 		}
-		hb <- struct{}{}
+		hbChan <- struct{}{}
 		if err := c.handleMessage(message); err != nil {
 			log.Errorf("message handling error: %v", err)
 		}
@@ -253,12 +274,12 @@ func (c *wsClient) parseObookInitial(i interface{}) ([]OrderBookUpd, error) {
 	return updates, nil
 }
 
-func (c *wsClient) closeConn() error {
+func (c *wsClient) closeConnWithErr(err error) error {
 	c.m.Lock()
 	conn := c.conn
 	c.conn = nil
 	for _, sub := range c.subs {
-		asyncErr(sub.errChan, nil)
+		asyncErr(sub.errChan, err)
 	}
 	c.m.Unlock()
 	if conn != nil {
@@ -273,15 +294,15 @@ func (c *wsClient) closeConn() error {
 }
 
 func (c *wsClient) cmd(command string, channel int) error {
-	client, err := c.checkWsClient()
-	if err != nil {
-		return err
+	cmd := wsCmd{
+		message: map[string]interface{}{
+			"command": command,
+			"channel": channel,
+		},
+		resultCh: make(chan error, 1),
 	}
-	m := map[string]interface{}{
-		"command": command,
-		"channel": channel,
-	}
-	return client.WriteJSON(m)
+	c.writeChan <- cmd
+	return <-cmd.resultCh
 }
 
 func (c *wsClient) makeMarektUpdateHandler(updatesCh chan<- MarketUpd) func(interface{}) {

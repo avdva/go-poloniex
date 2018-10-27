@@ -137,7 +137,7 @@ func (b *Poloniex) SubscribeOrderBook(symbolID int, updatesCh chan<- MarketUpd, 
 
 // UnsubscribeAll cancels all active subscriptions.
 func (b *Poloniex) UnsubscribeAll() error {
-	return b.wsClient.closeConn()
+	return b.wsClient.close()
 }
 
 // Close closes ws connections.
