@@ -51,7 +51,7 @@ func newWsClient() *wsClient {
 	return result
 }
 
-func (c *wsClient) close() error {
+func (c *wsClient) shutdown() error {
 	c.m.Lock()
 	if c.wsChan != nil {
 		close(c.wsChan)
@@ -59,6 +59,37 @@ func (c *wsClient) close() error {
 	}
 	c.m.Unlock()
 	return c.closeConnWithErr(nil)
+}
+
+func (c *wsClient) closeConnWithErr(err error) error {
+	c.m.Lock()
+	conn := c.conn
+	c.conn = nil
+	for _, sub := range c.subs {
+		asyncErr(sub.errChan, err)
+	}
+	c.m.Unlock()
+	if conn != nil {
+		async.DoWithTimeout(func() error {
+			return conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		}, func(e error) {
+			log.Warnf("timeout writing ws close message")
+		}, 2*time.Second)
+		return conn.Close()
+	}
+	return nil
+}
+
+func (c *wsClient) cmd(command string, channel int) error {
+	cmd := wsCmd{
+		message: map[string]interface{}{
+			"command": command,
+			"channel": channel,
+		},
+		resultCh: make(chan error, 1),
+	}
+	c.writeChan <- cmd
+	return <-cmd.resultCh
 }
 
 func (c *wsClient) makeWsClient() (*websocket.Conn, error) {
@@ -272,37 +303,6 @@ func (c *wsClient) parseObookInitial(i interface{}) ([]OrderBookUpd, error) {
 	fill(oBookUpd.OrderBook[0], Sell)
 	fill(oBookUpd.OrderBook[1], Buy)
 	return updates, nil
-}
-
-func (c *wsClient) closeConnWithErr(err error) error {
-	c.m.Lock()
-	conn := c.conn
-	c.conn = nil
-	for _, sub := range c.subs {
-		asyncErr(sub.errChan, err)
-	}
-	c.m.Unlock()
-	if conn != nil {
-		async.DoWithTimeout(func() error {
-			return conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		}, func(e error) {
-			log.Warnf("timeout writing ws close message")
-		}, 2*time.Second)
-		return conn.Close()
-	}
-	return nil
-}
-
-func (c *wsClient) cmd(command string, channel int) error {
-	cmd := wsCmd{
-		message: map[string]interface{}{
-			"command": command,
-			"channel": channel,
-		},
-		resultCh: make(chan error, 1),
-	}
-	c.writeChan <- cmd
-	return <-cmd.resultCh
 }
 
 func (c *wsClient) makeMarektUpdateHandler(updatesCh chan<- MarketUpd) func(interface{}) {
