@@ -216,13 +216,14 @@ func (c *wsClient) parseMessage(msg wsMessage) error {
 			}
 		}
 	}
-	if len(mu.Obooks)+len(mu.Trades) == 0 {
-		return nil
-	}
 	c.m.Lock()
 	handler := c.subs[int(id)].handler
 	c.m.Unlock()
-	if handler != nil {
+	if handler == nil {
+		return nil
+	}
+	if len(mu.Obooks)+len(mu.Trades) > 0 && msg.seq != nil {
+		mu.Seq = *msg.seq
 		handler(mu)
 	}
 	return nil
